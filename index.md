@@ -1,5 +1,5 @@
 Milestone Report -- Data Science Capstone Project
-December 25, 2024
+December 29, 2024
 
 Introduction
 This milestone report is a part of the data science capstone project of [Coursera](https://www.coursera.org, https://www.coursera.org/learn/data-science-project/home/week/2) and Swiftkey. The main objective of the capstone project is to transform corpora of text into a Next Word Prediction system, based on word frequencies and context, applying data science in the area of natural language processing. This Rmarkdown report describes exploratory analysis of the sample training data set and summarizes plans for creating the prediction model. Text mining R packages tm[1] and quanteda[2] are used for cleaning, preprocessing, managing and analyzing text. This report meets the following requirements:
