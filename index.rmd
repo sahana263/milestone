@@ -1,0 +1,449 @@
+---
+title: "Milestone Report -- Data Science Capstone Project"
+date: "December 25 2024"
+output: 
+  html_document: 
+    highlight: textmate
+    fig_caption: yes
+    keep_md: yes
+    number_sections: no
+    toc: yes
+---
+
+```{r setoptions, include = F, cache = F, echo = F, message = F, warning = F, tidy = T, results='hide', error = F, comment = NA }
+library(knitr) 
+options(width = 100)
+
+knitr::opts_chunk$set(echo = FALSE, message = F, error = F, warning = F, comment = NA, fig.width = 6, fig.asp = 0.618, out.width = "70%", fig.align = 'center', fig.show = "hold", dev = "png", dpi = 100, tidy = F, cache.path = '.cache/', fig.path = 'fig/', cash = TRUE)
+
+options(xtable.type = 'html')
+knit_hooks$set(inline = function(x) {
+    if(is.numeric(x)) {
+        round(x, getOption('digits'))
+    } else {
+        paste(as.character(x), collapse = ', ')
+    }
+})
+knit_hooks$set(plot = knitr:::hook_plot_html)
+```
+
+## Introduction
+
+This milestone report is a part of the **data science** capstone project of [Coursera](https://www.coursera.org, https://www.coursera.org/learn/data-science-project/home/week/2) and [Swiftkey](http://swiftkey.com/). The main objective of the capstone project is to transform corpora of text into a **Next Word Prediction** system, based on word frequencies and context, applying data science in the area of **natural language processing**. 
+This Rmarkdown report describes exploratory analysis of the sample training data set and summarizes plans for creating the prediction model. Text mining R packages **tm**[1] and **quanteda**[2] are used for cleaning, preprocessing, managing and analyzing text. This report meets the following requirements:  
+
+* Downloads, loads the data, creates sample training data and preprocess it.  
+
+* Generates summary statistics about the data sets and makes basic plots such as histograms to illustrate features of the data.  
+
+* Describes some interesting findings.  
+
+* Reports plans for creating a prediction algorithm and Shiny app.  
+
+## Data Acquisition and Summary Statistics
+
+### Data Source  
+The text data for this project is offered by **coursera-Swiftkey**, including three types of sources: blogs, news and twitter with four different languages. The English - United States data sets will be used in this report.  
+```{r}
+# clear the environment
+    rm(list = ls())
+```
+### Load the libraries
+```{r, loadlibs, include = F, results='hide', echo = F, message = F, warning = F}
+library(downloader); library(stringi); library(readr); library(stringr); library(dplyr); library(tibble); library(ggplot2); library(ggthemes); library(tm); library(quanteda); 
+```  
+The R packages used here include: quanteda, tm, stringi, downloader, readr, stringr, dtplyr, tibble, ggplot2, rmarkdown, knitr, and ggthemes. 
+
+### Download and Load the Course Data Sets
+```{r load_data, echo = F, message = F, warning = F }
+#require(downloader); #require(stringr)
+# Download and unzip the data to local disk
+url <- "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+dfolder <- "../data_capstone"
+
+if(!file.exists(dfolder)) file.create(dfolder)
+
+zfile <- basename(url)
+zpath <- file.path(dfolder, zfile)
+
+if (!file.exists(zpath)) {
+downloader::download(url, destfile = zpath, mode = "wb") # mode="wb": download in binary mode.
+unzip(zipfile = zpath, exdir = dfolder)
+unlink(url)
+}
+paths <- list.files(dfolder, pattern = ".*en_US.*.txt", recursive = T)
+
+fpaths <- file.path(dfolder, paths)
+files <- basename(fpaths)
+#dpath <- dirname(fpaths)[1]
+dir <- dirname(fpaths)[1]
+```  
+Download the data and save to local disk:  
+```{r}
+fpaths
+```  
+### Summary Statistics about the Data Sets
+
+```{r stats, echo = F, message = F, warning = F}
+#require(stringr); library(dplyr); library(tibble)
+
+wdir <- getwd()
+
+tpath <- file.path("fileSummary.rds")
+
+if (!file.exists(tpath)) {
+
+setwd("../data_capstone/final/en_US")
+getwd()
+
+file.name <- c(list.files(), "Total")
+
+fsize <- round(file.size(list.files())/1024^2)
+filesize <- c(fsize, sum(fsize))
+word.count <- as.numeric(str_extract(
+system("wc -w *.txt", intern = TRUE), "[0-9]+"))
+line.count <- as.numeric(str_extract(
+system("wc -l *.txt", intern = TRUE), "[0-9]+"))
+longest <- as.numeric(str_extract(
+system("wc -L *.txt", intern = TRUE), "[0-9]+"))
+
+tbldf <- tibble("file_name" = file.name,
+                "file_size (Mb)" = filesize,
+                "word_count" = word.count,
+                "line_count" = line.count,
+                "Max words/line" = longest,
+                "Avg words/line" = ceiling(word.count / line.count)
+)
+fileSummary <- knitr::kable(tbldf)
+
+setwd(wdir)
+
+write_rds(fileSummary, tpath)
+
+} else {
+
+fileSummary <- read_rds(tpath)
+}
+```
+
+```{r}
+#cat("Summary statistics of the original text data files:\n")
+fileSummary
+```  
+
+### Load the text Data in R and remove non-ASCII characters
+
+```{r read, echo = F, message = F, warning = F }
+# Function to read and remove non-ASCII characters
+remove_nonascii <- function(x) {
+    txt <- readLines(x, encoding = "UTF-8", skipNul = TRUE)
+    txt <- txt[-grep("tmp", iconv(txt, "latin1", "ASCII", sub = "tmp"))]
+    return(txt)
+}
+# Load local files  
+
+blog <- remove_nonascii("../data_capstone/final/en_US/en_US.blogs.txt")
+twit <- remove_nonascii("../data_capstone/final/en_US/en_US.twitter.txt") 
+news <- read_lines("../data_capstone/final/en_US/en_US.news.txt") 
+news <- news[-grep("tmp", iconv(news, "latin1", "ASCII", sub = "tmp"))]
+
+```
+
+### Sampling the Data for exploratory analysis   
+In order to enable faster data processing, a data sample from all three sources was generated, extracting 0.01 of data randomly using **rbinoma()** function and store them. 
+
+```{r sampling, echo = F, message = F, warning = F}
+# Create sample dataset using rbinom()
+sample.dir <- "./sampletext"
+sample1 <- file.path(sample.dir, "/blogSample.txt")
+sample2 <- file.path(sample.dir, "/newsSample.txt")
+sample3 <- file.path(sample.dir, "/twitSample.txt")
+
+if (!dir.exists(sample.dir)){
+    dir.create(sample.dir, recursive = TRUE)
+}
+if (!file.exists(sample1)) {
+    set.seed(135)
+    sblog <- blog[rbinom(blog, 1, 0.01) == 1]
+    snews <- news[rbinom(news, 1, 0.01) == 1]
+    stwit <- twit[rbinom(twit, 1, 0.01) == 1]
+ 
+    writeLines(sblog, sample1)
+    writeLines(snews, sample2)
+    writeLines(stwit, sample3)   
+    
+    #rm(blog); #rm(news); #rm(twit)    
+
+    } else {
+    sblog <- readLines(sample1, encoding = "UTF-8")  
+    snews <- readLines(sample2, encoding = "UTF-8") 
+    stwit <- readLines(sample3, encoding = "UTF-8")
+    }
+rm(blog);rm(news);rm(twit)
+```
+
+```{r}
+#require(tibble)
+#cat("Sample texts: \n")
+tibble("sample text" = c("sblog", "snews", "stwit"),
+           "length" = c(length(sblog),length(snews),length(stwit)))
+```
+
+## Data Cleaning and Preprocessing
+
+### Loading bad-word list from [here](https://raw.githubusercontent.com/shutterstock/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/master/en)
+
+```{r badwords, echo = F, message = F, warning = F }
+require(stringi); require(stringr); require(downloader)
+# list of bad/profane words download from github
+badwordsURL <- "https://raw.githubusercontent.com/shutterstock/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/master/en"
+
+if (!file.exists("badwords.txt")) {
+download(badwordsURL, destfile = "badwords.txt")}
+
+badWords <- stri_read_lines("badwords.txt")
+badWords <- str_to_lower(badWords)
+badWords <- badWords[-length(badWords)]
+
+saveRDS(badWords, "badwords.rds")
+```
+
+### Create a tm corpus from three kinds of samples
+
+```{r tmcorpus}
+#require(NLP); require(tm)
+ 
+tcorps <- tm::VCorpus(VectorSource(c(sblog, snews, stwit)))
+
+#tcorps <- tm::VCorpus(DirSource(sample.dir), readerControl = list(reader = readPlain, language = "en", encoding = "UTF-8")    
+```  
+### Clean and transform the corpus using stringi() and tm_map() 
+The cleaning and preprocessing include:   
+
+* convert to lowercase
+* remove stopwords: c("will", quanteda::stopwords("english")
+* remove profanity and other bad words
+* remove URL: (http, https, atp, www and followings)
+* remove twitter hash tag and email id
+* remove Symbols
+* remove Punctuation including Hyphens using tm::removePunctuation
+* remove Numbers 
+* Stem words using tm::stemDocument (Porter’s stemming algorithm)
+* remove white space  
+
+```{r tm_map, cache = TRUE, echo = FALSE, include = FALSE}
+# Function to clean and transform a tm corpus
+require(tm); require(stringi); require(stringr)
+
+corpusCleaner <- function(corps, badWords){
+     
+    # convert UTF-8 to latin1 encoding in order to make the strings with mixed octal/hex and unicode like "\xf0\u009f" be parsed.
+    #tolatin <- function(x) iconv(x, from="UTF-8", to="latin1", sub=" ")
+    #corps <- tm_map(corps, content_transformer(tolatin))
+    
+    # convert text to lowercase
+    corps <- tm_map(corps, content_transformer(tolower))
+ 
+    #remove stopwords
+    corps <- tm_map(corps, removeWords, (c("will", quanteda::stopwords("english"))))
+    
+    #remove profinatory and other bad words
+    corps <- tm_map(corps, removeWords, badWords)
+    
+    # remove URL
+    RemoveURL <- function(x){
+        stri_replace_all_regex(x, "(ht|f)tp\\S+\\s*", " ")
+        stri_replace_all_regex(x, "www\\S+\\s*", " ")
+    }
+    corps <- tm_map(corps, content_transformer(RemoveURL))
+    
+    # remove twitter hashtag and email id
+    RemoveHashtag <- function(x) {
+        stri_replace_all_regex(x, "\\S+(@|#)\\S+", " ")
+    }
+    corps <- tm_map(corps, content_transformer(RemoveHashtag))
+    
+    # remove Symbols
+    RemoveSymbols <- function(x) {
+        stri_replace_all_regex(x, "[\\p{S}]" , " ")
+    }
+    corps <- tm_map(corps, content_transformer(RemoveSymbols))
+    
+    # remove Punctuations including Hyphens
+    corps <- tm_map(corps, tm::removePunctuation)
+    
+    # remove Numbers 
+    corps <- tm_map(corps, tm::removeNumbers)
+    
+    # Stem words in a text document using Porter’s stemming algorithm.
+    corps <- tm_map(corps, tm::stemDocument)
+    
+    # remove white space
+    corps <- tm_map(corps, tm::stripWhitespace)
+    
+    # PlainTextDocument (useful?)
+    #corps <- tm_map(corps, tm::PlainTextDocument)
+    
+    return(corps)
+}
+```
+
+```{r cleaning}
+# Cleaning the tm corpus
+tcorps <- corpusCleaner(tcorps, badWords)
+```  
+
+### Converting tm corpus to quanteda corpus
+
+```{r qcorpus}
+# Convert to quanteda corpus in order to use dfm
+qcorp <- quanteda::corpus(tcorps)
+ 
+```
+
+```{r qcorp}
+cat("sample quanteda corpus: ")
+summary(qcorp, 5)
+```
+
+## N-grams and dfm (sparse Document-Feature Matrix)
+### Creating dfm for n-grams
+In statistical Natural Language Processing (NLP), an n-gram is a contiguous sequence of n items from a given sequence of text or speech. Bigram and trigram are combination of two and tree words respectively. We will build and use n-gram model, a type of probabilistic language model, for predicting the next item in such a sequence in the form of a (n − 1)–order Markov model.
+
+#### Unigram
+```{r unidfm}
+unidfm <- dfm(qcorp, ngram = 1) 
+unidfm
+```
+#### Bigram
+```{r bidfm}
+bidfm <- dfm(qcorp, ngram = 2) 
+bidfm
+```
+#### Trigram
+```{r tridfm}
+tridfm <- dfm(qcorp, ngram = 3) 
+tridfm
+```
+
+### Most common ngrams
+#### The most common unigrams
+```{r topuni, echo = F, message = F, warning = F }
+topUni <- topfeatures(unidfm, n = 20, decreasing = TRUE, ci = 0.95)
+topUni.df <- data.frame(word = names(topUni), freq=topUni, row.names = NULL)
+```
+```{r}
+names(topUni)
+```
+
+```{r, echo = F, message = F, warning = F }
+bar.plot <- function(data, label, colorid) {
+    ggplot(data[1:20,], aes(reorder(word, freq), freq)) +
+         labs(x = label, y = "Frequency") +
+         theme(axis.text.x = element_text(angle = 60, size = 11, hjust = 1)) + 
+         theme_economist_white() +
+         coord_flip() + 
+         geom_bar(stat = "identity", fill = I(colorid), alpha = 0.2)
+    }
+```
+
+```{r Unigrams}
+bar.plot(topUni.df, "Most Common Unigrams", "grey50")
+```
+
+```{r saveuniplot}
+ggsave("unigram_plot.png")
+```
+
+#### The most common bigrams
+ 
+```{r topbi}
+topBi <- topfeatures(bidfm, n = 20, decreasing = TRUE, ci = 0.95)
+topBi.df <- data.frame(word = names(topBi), freq=topBi, row.names=NULL)
+```
+```{r}
+#cat("The most frequent Bigrams: \n")
+names(topBi)
+```
+```{r Bigrams}
+bar.plot(topBi.df, "Most Common Bigrams", "orange")
+```
+```{r savebiplot}
+ggsave("bigram_plot.png")
+```
+
+#### The most common trigrams  
+ 
+```{r toptri}
+topTri <- topfeatures(tridfm, n = 20, decreasing = TRUE, ci = 0.95)
+topTri.df <- data.frame(word = names(topTri), freq = topTri, row.names = NULL)
+```
+```{r}
+#cat("The most common Trigrams: \n")
+names(topTri)
+```
+
+```{r Trigrams}
+bar.plot(topTri.df, "Most Common Trigrams", "blue")
+```
+```{r savetriplot}
+ggsave("trigram_plot.png")
+```
+ 
+## Some Observations and Issues in the Exploritary Analysis
+
+1. The three corpora of US english text are around 200, 196, and 159 Megabytes respectively. The twitter corpus has shorter lines, not exceeding 140 "words" per line; while the blogs has the longest line. 
+
+2. Bigrams and trigrams should be formed within a sentence, not crossing the sentences. 
+
+3. Cleaning and other preprocessing may make the sentence boundaries vague or destroyed. We may use special tokens to mark the beginning and ending of each sentence before converting to lower case.  
+
+4. Trigrams such as "follow_follow_back" and "love_love_love" should not happen by the ngrams functions. Need to avoid them Or filter them.
+
+5. Word stemming is necessary, but it may result in something like "peopl", "citi", "happi", "good_morn", "st_loui_counti", "cinco_de_mayo". Restoring some stemmed words might need a lot of work. Any better ways?
+
+6. Removing the stopwords is necessary concerning the memory size and speed. But the stopwords might be necessary to get real world phrases in the final next-word prediction.
+
+7. Data size, memory, speed and accuracy are the challenges, especially for very limited resources (such as x86-64, windows 7 with 8GB RAM).
+
+## Plans for creating a prediction algorithm and Shiny app
+
+1. Split the original data randomly into training, held-out and test data set with 60%, 20% and 20% ratio. 
+
+2. Rewrite the cleaning and preprocessing functions. Tokenize as "sentence" at first before converting to lower case and removing punctuation. Find out better ways to handle "stemming" and "stopwords" issues. 
+
+3. Clean and preprocess the training, held-out and test sets exactly the same way.  Test data should not be touched in the model building process, but should have the same feature variables as training data. But in the reality the test data may have words that are not in the training sets. (Please correct me if my understanding is incorrect.)  
+
+4. Create unigrams, bigrams and trigrams from the training data.  Remove singletons and sparse terms.
+
+5. Want to build an interpolated modified Kneser-Ney smoothing next word prediction model. Will try to compile on Windows 7 the `KenLM` package (in C++), which seems superior in memory demand, performance, accuracy and speed. But `KenLM` is not found in CRAN. Any suggestion?
+
+6. Apply the model to the held-out data set to evaluate and tune the model.
+
+7. Apply the word prediction model to the test data sets to predict the next word.
+
+8. Create a shiny App and publish it at "shinyapps.io" server.
+
+Any corrections and suggestions would be deeply appreciated. 
+ 
+## References:
+[1] Ingo Feinerer and Kurt Hornik (2017). tm: Text Mining Package. R package version 0.7-1. https://CRAN.R-project.org/package=tm; Ingo Feinerer, Kurt Hornik, and David Meyer (2008). Text Mining Infrastructure in R. Journal of Statistical Software 25(5): 1-54. URL: http://www.jstatsoft.org/v25/i05/.
+
+[2] Benoit, Kenneth and Paul Nulty. (2017). "quanteda: Quantitative Analysis of Textual Data". R package version: 0.9.9-24. URL https://github.com/kbenoit/quanteda;
+https://cran.r-project.org/web/packages/quanteda/index.html; http://quanteda.io/articles/development-plans.html
+
+## Appendix
+* The Rmarkdown code index.Rmd can be found in [my github repository](https://github.com/mjdata/milestone-report)
+
+* Session Info
+```{r}
+sessionInfo()
+```
+
+
+
+
+
+
+
+ 
